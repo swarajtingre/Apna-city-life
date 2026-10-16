@@ -1,0 +1,399 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Apna City Life V1</title>
+<style>
+*{box-sizing:border-box;touch-action:none}
+body{margin:0;overflow:hidden;background:#8dc7e8;font-family:Arial;color:white}
+canvas{display:block;width:100vw;height:100dvh}
+button{border:1px solid #ffffff65;background:#152535dd;color:white;border-radius:14px;font-weight:bold;padding:13px;cursor:pointer}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:#101c2bdb;border:1px solid #ffffff35;border-radius:12px;padding:10px}
+#stats{position:absolute;top:10px;left:10px;font-size:13px;line-height:1.7}
+#map{position:absolute;right:10px;top:10px;width:120px;height:120px;border:2px solid white;border-radius:12px;background:#273c35}
+#mission{position:absolute;top:140px;left:10px;max-width:200px;font-size:12px}
+#joystick{position:absolute;left:22px;bottom:24px;width:125px;height:125px;border-radius:50%;background:#ffffff22;border:2px solid #ffffff88;pointer-events:auto}
+#stick{position:absolute;left:36px;top:36px;width:49px;height:49px;border-radius:50%;background:#ffffffbd;border:2px solid white}
+#actions{position:absolute;right:15px;bottom:25px;display:flex;flex-direction:column;gap:9px;align-items:center;pointer-events:auto}
+#actions button{width:77px;height:52px;font-size:12px}
+#topbuttons{position:absolute;right:10px;top:140px;display:flex;gap:6px;pointer-events:auto}
+#notice{position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);background:#101c2be8;padding:12px 20px;border-radius:12px;display:none;text-align:center}
+#menu{position:fixed;inset:0;background:linear-gradient(#07131ac9,#07131af2);display:flex;align-items:center;justify-content:center;z-index:5;padding:20px}
+#menu .box{max-width:420px;width:100%;text-align:center;background:#172a38;border:1px solid #ffffff40;border-radius:22px;padding:24px}
+#menu h1{font-size:32px;margin:0 0 6px;color:#70e9ba}
+#menu p{color:#d3e3ea;line-height:1.6;font-size:14px}
+#menu button{width:100%;margin-top:10px;background:#168b67;font-size:17px}
+#menu .secondary{background:#304454;font-size:14px}
+.hidden{display:none!important}
+@media(max-height:500px){
+#joystick{width:100px;height:100px;bottom:12px}
+#stick{left:26px;top:26px}
+#actions{bottom:10px}
+#actions button{height:42px}
+#mission{top:125px}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud" class="hidden">
+ <div id="stats" class="panel">
+  <b>🏙️ APNA CITY LIFE</b><br>
+  💵 Cash: ₹<span id="cash">500</span><br>
+  ⭐ Level: <span id="level">1</span><br>
+  ⚡ Energy: <span id="energy">100</span><br>
+  🚶 Mode: <span id="mode">Walking</span>
+ </div>
+ <canvas id="map" width="120" height="120"></canvas>
+ <div id="mission" class="panel">📍 Mission: Green marker tak jao.</div>
+ <div id="topbuttons">
+  <button id="jobBtn" style="padding:9px">💼 JOB</button>
+  <button id="pauseBtn" style="padding:9px">Ⅱ</button>
+ </div>
+ <div id="joystick"><div id="stick"></div></div>
+ <div id="actions">
+  <button id="enterBtn">🚗 ENTER</button>
+  <button id="jumpBtn">⬆ JUMP</button>
+  <button id="interactBtn">✋ ACTION</button>
+ </div>
+ <div id="notice"></div>
+</div>
+<div id="menu">
+ <div class="box">
+  <h1>APNA CITY LIFE</h1>
+  <b>INDIAN OPEN WORLD ROLEPLAY</b>
+  <p>🏙️ Explore the city<br>🚘 Drive vehicles<br>💼 Complete jobs and earn cash<br>🧭 Discover missions and level up<br>📱 Made for Android and HopWeb</p>
+  <button id="playBtn">▶ PLAY GAME</button>
+  <button id="settingsBtn" class="secondary">⚙ SETTINGS</button>
+  <p id="settingsText" class="hidden">Sound: <button id="soundBtn">ON</button><br>Graphics automatically adapt to your screen.</p>
+  <p style="font-size:11px">Single-file edition • Offline gameplay • V1</p>
+ </div>
+</div>
+<script>
+(()=>{
+"use strict";
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+const map=$('map'),mc=map.getContext('2d');
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){
+ dpr=Math.min(devicePixelRatio||1,2);
+ W=innerWidth;H=innerHeight;
+ canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
+ canvas.style.width=W+'px';canvas.style.height=H+'px';
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize',resize);resize();
+const WORLD=3000,ROAD=150,CELL=400;
+let running=false,paused=false,sound=true;
+let cash=500,xp=0,level=1,energy=100;
+let cam={x:0,y:0},time=0;
+const player={x:1500,y:1500,a:0,speed:0,inCar:false,vehicle:null,jump:0};
+const keys={};
+let joy={x:0,y:0,active:false,id:null};
+const buildings=[],trees=[],npcs=[],cars=[];
+let mission=null,noticeTimer=0,last=0;
+function rand(seed){let t=Math.sin(seed*127.1+311.7)*43758.5453;return t-Math.floor(t)}
+// City blocks
+for(let gx=0;gx<8;gx++)for(let gy=0;gy<8;gy++){
+ const bx=gx*CELL+ROAD/2+18,by=gy*CELL+ROAD/2+18;
+ const seed=gx*19+gy*73;
+ if(rand(seed)>.16){
+  const w=110+rand(seed+1)*90,h=105+rand(seed+2)*100;
+  buildings.push({x:bx+rand(seed+3)*130,y:by+rand(seed+4)*125,w,h,
+   color:['#dfad7b','#c5d5d5','#d8c58e','#d68e76','#9db7a7','#b6a4d2'][Math.floor(rand(seed+5)*6)],
+   floors:1+Math.floor(rand(seed+6)*4)});
+ }
+}
+for(let i=0;i<90;i++){
+ let tx=rand(i+800)*WORLD,ty=rand(i+1200)*WORLD;
+ if(!nearRoad(tx,ty))trees.push({x:tx,y:ty,r:9+rand(i+5)*9});
+}
+function nearRoad(x,y){
+ return Math.abs((x%CELL)-CELL/2)<ROAD*.58 ||
+        Math.abs((y%CELL)-CELL/2)<ROAD*.58;
+}
+function makeCar(x,y,a,type='car'){
+ return {x,y,a,type,speed:0,color:['#e64b3c','#e9c94b','#36a7b4','#e7e7e7','#4385d2'][Math.floor(Math.random()*5)],occupied:false};
+}
+for(let i=0;i<30;i++){
+ const gx=Math.floor(rand(i+300)*7),gy=Math.floor(rand(i+400)*7);
+ const horizontal=rand(i+500)>.5;
+ const cx=gx*CELL+CELL/2,cy=gy*CELL+CELL/2;
+ cars.push(makeCar(cx+(horizontal?0:ROAD*.32),cy+(horizontal?ROAD*.32:0),horizontal?0:Math.PI/2,i%5===0?'bike':'car'));
+}
+for(let i=0;i<55;i++){
+ npcs.push({x:100+rand(i+900)*2800,y:100+rand(i+1300)*2800,
+ a:rand(i+1500)*6.28,walk:rand(i+1600)*2});
+}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function message(t){
+ $('notice').textContent=t;$('notice').style.display='block';noticeTimer=2.5;
+}
+function updateHUD(){
+ $('cash').textContent=cash;$('level').textContent=level;
+ $('energy').textContent=Math.round(energy);
+ $('mode').textContent=player.inCar?player.vehicle.type.toUpperCase():'Walking';
+}
+function newMission(){
+ const opts=[
+  {name:'Food Delivery',pay:180,desc:'Restaurant tak jao.'},
+  {name:'Taxi Ride',pay:250,desc:'Passenger destination tak pahuncho.'},
+  {name:'Parcel Job',pay:200,desc:'Parcel collect karo.'},
+  {name:'City Explorer',pay:120,desc:'Green marker tak jao.'}
+ ];
+ const q=opts[Math.floor(Math.random()*opts.length)];
+ mission={x:250+Math.random()*2500,y:250+Math.random()*2500,...q};
+ $('mission').textContent='💼 '+q.name+' • ₹'+q.pay+' | '+q.desc;
+}
+function start(){
+ $('menu').classList.add('hidden');$('hud').classList.remove('hidden');
+ running=true;paused=false;newMission();updateHUD();
+ last=performance.now();requestAnimationFrame(loop);
+}
+$('playBtn').onclick=start;
+$('settingsBtn').onclick=()=>$('settingsText').classList.toggle('hidden');
+$('soundBtn').onclick=()=>{sound=!sound;$('soundBtn').textContent=sound?'ON':'OFF'};
+$('pauseBtn').onclick=()=>{
+ paused=!paused;
+ if(paused){message('Game paused. Press Ⅱ to continue.');}
+ else {last=performance.now();message('Game resumed');}
+};
+$('jobBtn').onclick=()=>{
+ if(!mission)newMission();
+ message('Job: '+mission.name+' — green marker follow karo!');
+};
+function pointerJoy(e){
+ const r=$('joystick').getBoundingClientRect();
+ const cx=r.left+r.width/2,cy=r.top+r.height/2;
+ let dx=e.clientX-cx,dy=e.clientY-cy;
+ const max=r.width*.34,len=Math.hypot(dx,dy);
+ if(len>max){dx=dx/len*max;dy=dy/len*max}
+ joy.x=dx/max;joy.y=dy/max;
+ $('stick').style.transform=`translate(${dx}px,${dy}px)`;
+}
+$('joystick').addEventListener('pointerdown',e=>{
+ e.preventDefault();joy.active=true;joy.id=e.pointerId;
+ $('joystick').setPointerCapture(e.pointerId);pointerJoy(e);
+});
+$('joystick').addEventListener('pointermove',e=>{
+ if(joy.active&&e.pointerId===joy.id)pointerJoy(e);
+});
+function releaseJoy(){
+ joy.active=false;joy.x=0;joy.y=0;
+ $('stick').style.transform='translate(0,0)';
+}
+$('joystick').addEventListener('pointerup',releaseJoy);
+$('joystick').addEventListener('pointercancel',releaseJoy);
+addEventListener('keydown',e=>{
+ keys[e.key.toLowerCase()]=true;
+ if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();
+ if(e.key.toLowerCase()==='e')enterVehicle();
+ if(e.key.toLowerCase()==='f')interact();
+ if(e.key===' ')player.jump=1;
+});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+$('jumpBtn').addEventListener('pointerdown',e=>{e.preventDefault();player.jump=1});
+$('enterBtn').onclick=enterVehicle;
+$('interactBtn').onclick=interact;
+function enterVehicle(){
+ if(player.inCar){
+  const v=player.vehicle;v.occupied=false;
+  player.x=v.x+Math.cos(v.a+1.5)*42;
+  player.y=v.y+Math.sin(v.a+1.5)*42;
+  player.inCar=false;player.vehicle=null;player.speed=0;
+  message('Vehicle se bahar aa gaye');updateHUD();return;
+ }
+ let nearest=null,dd=75;
+ for(const v of cars){let d=dist(player,v);if(d<dd){dd=d;nearest=v}}
+ if(nearest){
+  player.inCar=true;player.vehicle=nearest;nearest.occupied=true;
+  player.x=nearest.x;player.y=nearest.y;player.a=nearest.a;
+  message(nearest.type==='bike'?'Bike ready!':'Car ready!');
+ }else message('Vehicle ke paas jao aur ENTER dabao.');
+ updateHUD();
+}
+function interact(){
+ if(mission&&dist(player,mission)<70){
+  cash+=mission.pay;xp+=mission.pay/10;
+  while(xp>=level*20){xp-=level*20;level++;cash+=100;message('LEVEL UP! Bonus ₹100 🎉')}
+  message('Mission complete! +₹'+mission.pay);
+  newMission();updateHUD();return;
+ }
+ if(energy<100){energy=Math.min(100,energy+15);message('Rested! Energy restored.')}
+ else message('Green mission marker tak jao!');
+}
+function blocked(x,y,r){
+ if(x<r||y<r||x>WORLD-r||y>WORLD-r)return true;
+ // Buildings block movement.
+ for(const b of buildings){
+  if(x+r>b.x&&x-r<b.x+b.w&&y+r>b.y&&y-r<b.y+b.h)return true;
+ }
+ return false;
+}
+function movePlayer(dt){
+ let f=0,turn=0;
+ if(keys.w||keys.arrowup)f++;
+ if(keys.s||keys.arrowdown)f--;
+ if(keys.a||keys.arrowleft)turn--;
+ if(keys.d||keys.arrowright)turn++;
+ f+=-joy.y;turn+=joy.x;
+ f=clamp(f,-1,1);turn=clamp(turn,-1,1);
+ const p=player;
+ if(p.inCar){
+  const v=p.vehicle;
+  v.a+=turn*2.1*dt*(v.speed>=0?1:-1);
+  v.speed+=f*(v.type==='bike'?270:210)*dt;
+  v.speed*=Math.pow(.97,dt*60);
+  v.speed=clamp(v.speed,-100, v.type==='bike'?330:260);
+  const nx=v.x+Math.cos(v.a)*v.speed*dt;
+  const ny=v.y+Math.sin(v.a)*v.speed*dt;
+  if(!blocked(nx,ny,18)){v.x=nx;v.y=ny}
+  else {v.speed*=-.18}
+  p.x=v.x;p.y=v.y;p.a=v.a;
+ }else{
+  p.a+=turn*2.5*dt;
+  // Joystick vertical drives forward/back relative to player.
+  const forward=f*145*dt;
+  const nx=p.x+Math.cos(p.a)*forward;
+  const ny=p.y+Math.sin(p.a)*forward;
+  if(!blocked(nx,p.y,12))p.x=nx;
+  if(!blocked(p.x,ny,12))p.y=ny;
+  if(p.jump>0)p.jump=Math.max(0,p.jump-dt*2.5);
+ }
+ energy=Math.min(100,energy+dt*1.5);
+ for(const n of npcs){
+  n.walk+=dt;
+  if(n.walk>2+rand(n.x+n.y)*4){n.a+=(rand(n.y+n.x+n.walk)*2-1)*2;n.walk=0}
+  const nx=n.x+Math.cos(n.a)*12*dt,ny=n.y+Math.sin(n.a)*12*dt;
+  if(!blocked(nx,ny,8)){n.x=nx;n.y=ny}else n.a+=2.2;
+ }
+}
+function drawRoads(){
+ ctx.fillStyle='#6b9b60';ctx.fillRect(0,0,WORLD,WORLD);
+ // Roads centered on every city grid.
+ for(let i=0;i<=7;i++){
+  const pos=i*CELL+CELL/2;
+  ctx.fillStyle='#454b50';
+  ctx.fillRect(pos-ROAD/2,0,ROAD,WORLD);
+  ctx.fillRect(0,pos-ROAD/2,WORLD,ROAD);
+  ctx.fillStyle='#d8d2a6';
+  for(let k=0;k<WORLD;k+=50){
+   ctx.fillRect(pos-2,k,4,24);
+   ctx.fillRect(k,pos-2,24,4);
+  }
+  ctx.fillStyle='#a9a9a9';
+  ctx.fillRect(pos-ROAD/2,0,5,WORLD);
+  ctx.fillRect(pos+ROAD/2-5,0,5,WORLD);
+  ctx.fillRect(0,pos-ROAD/2,WORLD,5);
+  ctx.fillRect(0,pos+ROAD/2-5,WORLD,5);
+ }
+}
+function drawWorld(){
+ ctx.save();ctx.translate(-cam.x,-cam.y);
+ drawRoads();
+ for(const b of buildings){
+  ctx.fillStyle='#00000030';ctx.fillRect(b.x+7,b.y+9,b.w,b.h);
+  ctx.fillStyle=b.color;ctx.fillRect(b.x,b.y,b.w,b.h);
+  ctx.fillStyle='#65737a';ctx.fillRect(b.x,b.y,b.w,9);
+  for(let fy=0;fy<b.floors;fy++){
+   for(let wx=0;wx<Math.floor(b.w/27);wx++){
+    ctx.fillStyle='#bde6ed';
+    ctx.fillRect(b.x+10+wx*27,b.y+18+fy*23,13,12);
+   }
+  }
+  ctx.fillStyle='#6e5947';ctx.fillRect(b.x+b.w/2-9,b.y+b.h-24,18,24);
+ }
+ for(const t of trees){
+  ctx.fillStyle='#785b3c';ctx.fillRect(t.x-3,t.y,6,13);
+  ctx.fillStyle='#246b3e';ctx.beginPath();ctx.arc(t.x,t.y,t.r,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#3c8a4d';ctx.beginPath();ctx.arc(t.x-3,t.y-4,t.r*.65,0,Math.PI*2);ctx.fill();
+ }
+ // NPCs
+ for(const n of npcs){
+  ctx.fillStyle='#00000025';ctx.beginPath();ctx.ellipse(n.x,n.y+8,7,4,0,0,7);ctx.fill();
+  ctx.fillStyle='#e7b18b';ctx.beginPath();ctx.arc(n.x,n.y-7,6,0,7);ctx.fill();
+  ctx.fillStyle='#3976be';ctx.fillRect(n.x-6,n.y-2,12,15);
+  ctx.fillStyle='#25364c';ctx.fillRect(n.x-5,n.y+12,4,8);ctx.fillRect(n.x+2,n.y+12,4,8);
+ }
+ // Vehicles
+ for(const v of cars)drawVehicle(v);
+ if(mission){
+  const pulse=13+Math.sin(time*4)*4;
+  ctx.strokeStyle='#40ff8c';ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(mission.x,mission.y,pulse,0,7);ctx.stroke();
+  ctx.fillStyle='#40ff8c';ctx.fillRect(mission.x-4,mission.y-4,8,8);
+ }
+ drawPlayer();
+ ctx.restore();
+}
+function drawVehicle(v){
+ ctx.save();ctx.translate(v.x,v.y);ctx.rotate(v.a);
+ if(v.type==='bike'){
+  ctx.fillStyle='#171a1c';
+  ctx.beginPath();ctx.ellipse(-11,0,5,10,0,0,7);ctx.fill();
+  ctx.beginPath();ctx.ellipse(12,0,5,10,0,0,7);ctx.fill();
+  ctx.fillStyle=v.color;ctx.fillRect(-11,-5,24,10);
+  ctx.fillStyle='#fff1a8';ctx.fillRect(13,-3,4,6);
+ }else{
+  ctx.fillStyle='#20272c';ctx.fillRect(-22,-13,44,26);
+  ctx.fillStyle=v.color;ctx.fillRect(-24,-10,48,20);
+  ctx.fillStyle='#a8d7e6';ctx.fillRect(-10,-8,18,16);
+  ctx.fillStyle='#fff4bb';ctx.fillRect(20,-8,4,5);ctx.fillRect(20,3,4,5);
+  ctx.fillStyle='#25282a';ctx.fillRect(-17,-15,10,4);ctx.fillRect(8,-15,10,4);
+  ctx.fillRect(-17,11,10,4);ctx.fillRect(8,11,10,4);
+ }
+ ctx.restore();
+}
+function drawPlayer(){
+ const p=player;
+ ctx.save();ctx.translate(p.x,p.y-p.jump*14);
+ ctx.fillStyle='#00000038';ctx.beginPath();ctx.ellipse(0,9,11,5,0,0,7);ctx.fill();
+ if(!p.inCar){
+  ctx.rotate(p.a);
+  ctx.fillStyle='#f2bd93';ctx.beginPath();ctx.arc(0,-9,7,0,7);ctx.fill();
+  ctx.fillStyle='#1686d9';ctx.fillRect(-7,-3,14,15);
+  ctx.fillStyle='#283849';ctx.fillRect(-6,11,5,8);ctx.fillRect(2,11,5,8);
+  ctx.fillStyle='#fff';ctx.fillRect(5,-11,3,2);
+ }else{
+  ctx.fillStyle='#f2bd93';ctx.beginPath();ctx.arc(0,-2,5,0,7);ctx.fill();
+ }
+ ctx.restore();
+}
+function drawMap(){
+ mc.fillStyle='#263a30';mc.fillRect(0,0,120,120);
+ const s=120/WORLD;
+ mc.fillStyle='#777d80';
+ for(let i=0;i<=7;i++){
+  const p=(i*CELL+CELL/2)*s;
+  mc.fillRect(p-3,0,6,120);mc.fillRect(0,p-3,120,6);
+ }
+ mc.fillStyle='#bdc3c5';
+ for(const b of buildings)mc.fillRect(b.x*s,b.y*s,b.w*s,b.h*s);
+ if(mission){
+  mc.fillStyle='#36ff87';mc.beginPath();mc.arc(mission.x*s,mission.y*s,3,0,7);mc.fill();
+ }
+ mc.fillStyle='#ffdc42';mc.beginPath();mc.arc(player.x*s,player.y*s,4,0,7);mc.fill();
+}
+function loop(now){
+ if(!running)return;
+ requestAnimationFrame(loop);
+ let dt=Math.min((now-last)/1000,.04);last=now;
+ if(paused)return;
+ time+=dt;
+ if(noticeTimer>0){noticeTimer-=dt;if(noticeTimer<=0)$('notice').style.display='none'}
+ movePlayer(dt);
+ cam.x=clamp(player.x-W/2,0,WORLD-W);
+ cam.y=clamp(player.y-H/2,0,WORLD-H);
+ ctx.clearRect(0,0,W,H);
+ drawWorld();drawMap();
+ if(Math.random()<.04)updateHUD();
+}
+})();
+</script>
+</body>
+</html>
